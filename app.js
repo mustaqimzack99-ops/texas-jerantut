@@ -595,6 +595,7 @@
 
   // Langkah 1: nama (boleh tukar setiap kali) + pilih gambar
   function startRoster() {
+    batch = null;
     if (window.GajiRoster && window.GajiRoster.warm) window.GajiRoster.warm();
     openSheet('<h3>' + t('scanTitle') + '</h3><p>' + t('scanSub') + '</p>' +
       '<label class="fld"><span>' + t('rosterName') + '</span><input class="txt" id="rnIn" maxlength="30" placeholder="' + t('namePh') + '" autocapitalize="words" value="' + esc(state.settings.rosterName || '') + '"></label>' +
@@ -610,12 +611,25 @@
     };
   }
 
-  // Langkah 2: baca semua gambar ikut susunan user tekan (gambar pertama = hari ini, seterusnya hari berikut)
+  // Susunan gambar: galeri phone tak bagi susunan user tekan, jadi susun ikut masa gambar disimpan
+  // (paling lama dulu = hari pertama); masa sama -> nama fail (WhatsApp IMG-tarikh-WA00xx ikut turutan hantar)
+  function orderFiles(list) {
+    return list.map(function (f, i) { return { f: f, i: i }; }).sort(function (p, q) {
+      var dt = (p.f.lastModified || 0) - (q.f.lastModified || 0);
+      if (Math.abs(dt) > 60000) return dt;
+      if (p.f.name !== q.f.name) return p.f.name < q.f.name ? -1 : 1;
+      return p.i - q.i;
+    }).map(function (x) { return x.f; });
+  }
+  // Langkah 2: baca gambar. Senarai baru, atau TAMBAH di bawah senarai sedia ada (butang Tambah gambar)
   function rosterFiles(files) {
     var list = [].slice.call(files || []);
     if (!list.length) return;
-    var run = ++rosterRun, items = [];
-    batch = { items: items, name: state.settings.rosterName, start: todayISO() };
+    list = orderFiles(list);
+    var add = batch && batch.append ? batch : null;
+    var run = ++rosterRun, items = add ? add.items : [];
+    if (add) add.append = false;
+    else batch = { items: items, name: state.settings.rosterName, start: todayISO() };
     openSheet('<h3>' + t('rosterTitle') + '</h3><div class="r-stat" id="rCount"></div>' +
       '<div class="prog"><i id="rProg"></i></div><div class="r-stat" id="rStat">' + t('loadingOcr') + '</div>',
       function () { if (rosterRun === run) { rosterRun++; batch = null; } });
@@ -646,13 +660,13 @@
     for (var p = 0; p < PAR; p++) launch();
   }
 
-  // Tarikh: yang tertulis dalam gambar (Date :05.10.2026) diguna terus. Selebihnya ikut susunan user tekan:
-  // gambar pertama = tarikh mula (default hari ini), gambar ke-2 = esok, dst. Tarikh yang user tukar sendiri kekal.
+  // Tarikh: yang tertulis dalam gambar (Date :05.10.2026) diguna terus. Selebihnya ikut susunan senarai:
+  // gambar pertama = tarikh mula (default hari ini), seterusnya = hari selepas gambar sebelumnya. Tarikh yang user tukar sendiri kekal.
   function fillDates(items) {
-    var start = (batch && batch.start) || todayISO();
-    items.forEach(function (it, k) {
-      if (it.manualDate) return;
-      it.date = it.res.date || addDays(start, k);
+    var start = (batch && batch.start) || todayISO(), prev = '';
+    items.forEach(function (it) {
+      if (!it.manualDate) it.date = it.res.date || (prev ? addDays(prev, 1) : start);
+      prev = it.date;
     });
   }
   // Petak tarikh: '?' kalau tiada tarikh
@@ -694,7 +708,8 @@
       (items.some(function (it) { return !it.date; }) ? '<div class="r-msg warn">' + t('undatedNote', items.filter(function (it) { return !it.date; }).length) + '</div>' : '') +
       '<label class="fld"><span>' + t('firstDate') + '</span><input type="date" id="bStart" value="' + (batch.start || '') + '"></label>' +
       '<div class="fine" style="margin:-4px 0 10px">' + t('firstDateHint') + '</div>' +
-      '<div class="rows" style="margin-bottom:12px">' + rows + '</div>' +
+      '<div class="rows" style="margin-bottom:10px">' + rows + '</div>' +
+      '<button class="btn ghost" id="bAdd" style="width:100%;margin-bottom:12px">' + ic('plus') + t('addImages') + '</button>' +
       '<div class="preview">' + t('batchTotal') + ' <span style="margin-left:auto">' + fmtH(tot) + ' ' + t('h') + '</span></div>' +
       '<div class="btn-row"><button class="btn ghost" id="bNo">' + t('cancel') + '</button>' +
       '<button class="btn" id="bSave"' + (okN ? '' : ' disabled') + '>' + t('saveAll', okN) + '</button></div></div>',
@@ -709,6 +724,10 @@
       if (!this.value) return;
       batch.start = this.value; fillDates(items); rosterSummary();
     });
+    $('bAdd').onclick = function () {
+      batch.append = true;
+      var inp = $('rosterFile'); inp.value = ''; inp.click();
+    };
     $('bNo').onclick = function () { batch = null; closeSheet(); };
     $('bSave').onclick = function () {
       var n = 0;
