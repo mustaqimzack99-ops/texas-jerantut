@@ -24,6 +24,7 @@
     x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
     scan: '<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>',
+    pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
     share: '<path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 10.5H6a1.5 1.5 0 0 0-1.5 1.5v7.5A1.5 1.5 0 0 0 6 21h12a1.5 1.5 0 0 0 1.5-1.5V12a1.5 1.5 0 0 0-1.5-1.5h-1"/>',
     addsq: '<rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><path d="M12 8v8M8 12h8"/>'
   };
@@ -397,10 +398,21 @@
     var st = state.settings;
     return Math.round(c.minutes * Math.round(Number(st.rate) * 100) / 60) + (c.midnight ? Math.round(Number(st.midnight) * 100) : 0);
   }
+  // Status rekod syif: 'verified' = terus dari punch Masuk/Balik (tak diubah), 'edited' = user ubah
+  function shiftMark(e) { return e.edited ? 'edited' : (e.inTs && e.outTs) ? 'verified' : ''; }
+  function markTag(e) {
+    var m = shiftMark(e);
+    return m === 'verified' ? '<span class="tag settled">' + ic('check') + t('verifiedTag') + '</span>'
+      : m === 'edited' ? '<span class="tag edited">' + ic('pen') + t('editedTag') + '</span>' : '';
+  }
+  function stampText(ms) {
+    var d = new Date(ms);
+    return d.getDate() + ' ' + MON()[d.getMonth()] + ', ' + fmt12(pad(d.getHours()) + ':' + pad(d.getMinutes()), true);
+  }
   function renderList() {
     var p = period(), list = sorted(p.entries).filter(function (e) { return !(e.type === 'time' && !e.out); }), s = C.summarize(p.entries, state.settings), today = todayISO();
     var html = '<div class="list-head"><div><h2>' + t('shifts') + '</h2><span>' + t('daysRec', list.length) + '</span></div></div>' +
-      '<div class="lock-note">' + ic('lock') + '<span>' + t('shiftsHint') + '</span></div>';
+      '<div class="lock-note">' + ic('check') + '<span>' + t('shiftsHint') + '</span></div>';
     html += '<div class="sum3"><div><b>' + s.workDays + '</b><span>' + t('workDays') + '</span></div><div><b>' + fmtH(s.totalMin) + '</b><span>' + t('totalHours') + '</span></div><div><b>' + s.midnightCount + '&times;</b><span>' + t('midnight') + '</span></div></div>';
     if (!list.length) {
       html += '<div class="rows"><div class="empty">' + ic('cal') + '<br>' + t('empty') + '</div></div>';
@@ -411,7 +423,7 @@
         var right = e.type === 'off' ? '0' : c.open ? '...' : c.ok ? fmtH(c.minutes) + t('h') : '!';
         // Gaji hari tu (kasar): jam x kadar + elaun midnight
         var dayRM = (e.type !== 'off' && !c.open && c.ok) ? '<span class="r-rm">RM' + fmtRM(dayPay(c)) + '</span>' : '';
-        var tags = (c.midnight ? '<span class="tag mid">MIDNIGHT</span>' : '') + (c.open ? '<span class="tag live">LIVE</span>' : '') +
+        var tags = markTag(e) + (c.midnight ? '<span class="tag mid">MIDNIGHT</span>' : '') + (c.open ? '<span class="tag live">LIVE</span>' : '') +
           (c.otMinutes ? '<span class="tag ot">+' + otLabel(c.otMinutes) + ' OT &middot; RM' + fmtRM(otPaySen(c.otMinutes)) + '?</span>' : '') +
           (e.type === 'off' ? '<span class="tag off">OFF</span>' : '') + (!c.ok ? '<span class="tag err">!</span>' : '');
         return '<button class="r' + (e.type === 'off' ? ' off' : '') + (e.date === today ? ' today' : '') + (c.otMinutes ? ' ot' : '') + '" data-edit="' + e.id + '">' +
@@ -1033,7 +1045,7 @@
     });
   }
 
-  // Syif selesai dikunci: tunjuk butiran sahaja (tiada ubah / padam)
+  // Butiran syif selesai: status VERIFIED / EDITED, boleh Edit atau Padam
   function openShiftView(e) {
     var c = C.calcEntry(e, state.settings), d = parseISO(e.date), st = state.settings;
     function row(label, val) { return '<div class="li"><div><b>' + label + '</b></div><span>' + val + '</span></div>'; }
@@ -1043,7 +1055,9 @@
       var ba = Math.round(c.breakActual != null ? c.breakActual : c.breakMin), bm = Math.round(c.breakMin);
       brk = ba < bm ? t('brkDeducted', bm, ba) : bm + ' min';
     }
-    var src = e.inTs ? t('srcPunch') : e.src === 'plan' ? t('srcPlan') : t('srcOld');
+    var src = (e.inTs || e.punched) ? t('srcPunch') : e.src === 'plan' ? t('srcPlan') : t('srcOld'), mk = shiftMark(e);
+    var markMsg = mk === 'verified' ? '<div class="r-msg ok" style="margin-top:12px">' + ic('check') + t('verifiedMsg') + '</div>'
+      : mk === 'edited' ? '<div class="r-msg warn" style="margin-top:12px">' + ic('pen') + t('editedMsg', e.editedAt ? stampText(e.editedAt) : '') + '</div>' : '';
     openSheet('<h3>' + t('shiftDetail') + '</h3><div class="slip">' +
       row(t('date'), DAYS()[d.getDay()] + ', ' + shortDate(e.date)) +
       row(t('timeL'), time) +
@@ -1053,10 +1067,11 @@
       (e.type !== 'off' && c.ok && !c.open ? row(t('dayPayL'), 'RM' + fmtRM(dayPay(c))) : '') +
       (e.sched ? row(t('schedL'), fmt12(e.sched.in, true) + ' &ndash; ' + fmt12(e.sched.out, true)) : '') +
       (c.otMinutes ? '<div class="li ot-li"><div><b>' + t('otLine') + '</b><span>' + t('otUnsure') + '</span></div><span>+' + otLabel(c.otMinutes) + ' &middot; RM' + fmtRM(otPaySen(c.otMinutes)) + '</span></div>' : '') +
-      row(t('sourceL'), src) + '</div>' +
-      '<div class="lock-note" style="margin-top:12px">' + ic('lock') + '<span>' + t('lockedNote') + '</span></div>' +
-      '<div class="btn-row"><button class="btn danger" id="svDel">' + t('del') + '</button><button class="btn ghost" id="svOk">OK</button></div>');
+      (e.edited && e.orig ? row(t('origL'), e.orig.type === 'off' ? 'OFF' : fmt12(e.orig.in, true) + ' &ndash; ' + fmt12(e.orig.out, true) + (e.orig.date !== e.date ? ' (' + shortDate(e.orig.date) + ')' : '')) : '') +
+      row(t('sourceL'), src) + '</div>' + markMsg +
+      '<div class="btn-row"><button class="btn danger" id="svDel">' + t('del') + '</button><button class="btn ghost" id="svEdit">' + ic('pen') + t('editBtn') + '</button><button class="btn" id="svOk">OK</button></div>');
     $('svOk').onclick = closeSheet;
+    $('svEdit').onclick = function () { openShiftEditor(e); };
     $('svDel').onclick = function () {
       closeSheet();
       confirmSheet(t('delShiftT'), t('delShiftB', shortDate(e.date)), t('DELETE'), true, function () {
@@ -1064,6 +1079,78 @@
         state.periods.forEach(function (p) { p.entries = p.entries.filter(function (x) { return x.id !== e.id; }); });
         save(); renderAll(); toast(t('shiftDeleted'), undo);
       });
+    };
+  }
+
+  // Ubah syif selesai. Disimpan dengan tanda EDITED + masa asal (sekali sahaja = masa punch pertama)
+  function openShiftEditor(e0) {
+    var d = clone(e0), hasAct = d.brk === 'actual';
+    openSheet('<div id="seWrap"><h3>' + t('editShift') + '</h3>' +
+      '<div class="r-msg warn">' + ic('pen') + t('editWarn') + '</div>' +
+      '<label class="fld"><span>' + t('date') + '</span><input type="date" id="sDate" value="' + d.date + '"></label>' +
+      segHTML('sType', [['time', t('segWork')], ['off', t('segOff')]], d.type === 'off' ? 'off' : 'time') +
+      '<div id="sTimeBox"><div class="row2">' +
+      '<label class="fld"><span>' + t('clockInL') + '</span><input type="time" id="sIn" value="' + (d.in || '') + '"></label>' +
+      '<label class="fld"><span>' + t('clockOutL') + '</span><input type="time" id="sOut" value="' + (d.out || '') + '"></label></div>' +
+      '<div class="fld-label">' + t('brk') + '</div>' +
+      segHTML('sBrk', [['none', t('brkNone')], ['std', state.settings.stdBreak + ' min'], ['actual', t('brkActual')]], d.brk === 'std' || d.brk === 'actual' ? d.brk : 'none') +
+      '<div class="row2" id="sActBox">' +
+      '<label class="fld"><span>' + t('brkStart') + '</span><input type="time" id="sBo" value="' + (hasAct ? d.brkOut || '' : '') + '"></label>' +
+      '<label class="fld"><span>' + t('brkEnd') + '</span><input type="time" id="sBi" value="' + (hasAct ? d.brkIn || '' : '') + '"></label></div></div>' +
+      '<div class="preview" id="sPrev"></div>' +
+      '<div class="btn-row"><button class="btn ghost" id="sCancel">' + t('cancel') + '</button><button class="btn" id="sSave">' + t('save') + '</button></div></div>');
+    function read() {
+      var x = { date: $('sDate').value, type: segVal('sType') };
+      if (x.type === 'time') {
+        x.in = $('sIn').value; x.out = $('sOut').value; x.brk = segVal('sBrk');
+        if (x.brk === 'actual') { x.brkOut = $('sBo').value; x.brkIn = $('sBi').value; }
+      }
+      return x;
+    }
+    // Entri hasil edit: tanpa cap masa punch; jadual dilekat semula ikut masa baru
+    function build(x) {
+      var n = clone(e0);
+      ['in', 'out', 'brk', 'brkOut', 'brkIn', 'inTs', 'outTs', 'brkOutTs', 'brkInTs', 'sched'].forEach(function (k) { delete n[k]; });
+      Object.keys(x).forEach(function (k) { n[k] = x[k]; });
+      if (n.type === 'time' && C.toMin(n.in) !== null && C.toMin(n.out) !== null) { if (!attachSched(n)) attachSchedByOverlap(n); }
+      return n;
+    }
+    function validate(x) {
+      if (!x.date) return t('vDate');
+      if (x.type !== 'time') return '';
+      if (!x.in) return t('vIn');
+      if (!x.out) return t('vOut');
+      var c = C.calcEntry(build(x), state.settings);
+      return c.ok ? '' : errText(c.error);
+    }
+    function refresh() {
+      var x = read();
+      $('sTimeBox').style.display = x.type === 'time' ? '' : 'none';
+      $('sActBox').style.display = segVal('sBrk') === 'actual' ? '' : 'none';
+      var err = validate(x), pv = $('sPrev');
+      pv.className = 'preview' + (err ? ' err' : '');
+      if (err) { pv.textContent = err; return; }
+      if (x.type === 'off') { pv.innerHTML = t('pvOff'); return; }
+      var c = C.calcEntry(build(x), state.settings);
+      pv.innerHTML = t('pvHours', fmtH(c.minutes)) + ' <span style="margin-left:auto">RM' + fmtRM(dayPay(c)) + '</span>';
+    }
+    bindSeg('sType', refresh); bindSeg('sBrk', refresh);
+    $('seWrap').addEventListener('input', refresh);
+    $('seWrap').addEventListener('change', refresh);
+    refresh();
+    $('sCancel').onclick = function () { openShiftView(e0); };
+    $('sSave').onclick = function () {
+      var x = read(), err = validate(x);
+      if (err) { toast(err); return; }
+      var same = ['date', 'type', 'in', 'out', 'brk', 'brkOut', 'brkIn'].every(function (k) { return (x[k] || '') === (e0[k] || ''); });
+      if (same) { closeSheet(); return; }
+      snapshot();
+      var n = build(x);
+      if (!n.orig) n.orig = { date: e0.date, type: e0.type, in: e0.in || '', out: e0.out || '', brk: e0.brk || '', brkOut: e0.brkOut || '', brkIn: e0.brkIn || '' };
+      if (e0.inTs) n.punched = true;
+      n.edited = true; n.editedAt = Date.now();
+      state.periods.forEach(function (p) { p.entries = p.entries.map(function (y) { return y.id === e0.id ? n : y; }); });
+      save(); closeSheet(); renderAll(); toast(t('shiftEdited'), undo);
     };
   }
 
