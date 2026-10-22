@@ -610,13 +610,12 @@
     };
   }
 
-  // Langkah 2: baca semua gambar ikut susunan nama fail (WhatsApp: IMG-tarikh-WA00xx)
+  // Langkah 2: baca semua gambar ikut susunan user tekan (gambar pertama = hari ini, seterusnya hari berikut)
   function rosterFiles(files) {
     var list = [].slice.call(files || []);
     if (!list.length) return;
-    list.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : (a.lastModified || 0) - (b.lastModified || 0); });
     var run = ++rosterRun, items = [];
-    batch = { items: items, name: state.settings.rosterName };
+    batch = { items: items, name: state.settings.rosterName, start: todayISO() };
     openSheet('<h3>' + t('rosterTitle') + '</h3><div class="r-stat" id="rCount"></div>' +
       '<div class="prog"><i id="rProg"></i></div><div class="r-stat" id="rStat">' + t('loadingOcr') + '</div>',
       function () { if (rosterRun === run) { rosterRun++; batch = null; } });
@@ -647,9 +646,15 @@
     for (var p = 0; p < PAR; p++) launch();
   }
 
-  // Tarikh: hanya yang tertulis dalam gambar (Date :05.10.2026). Tiada tarikh = kosong — user letak sendiri
-  // (boleh simpan dulu, letak tarikh kemudian dalam Jadual). App tak teka / susun sendiri.
-  function fillDates(items) { items.forEach(function (it) { it.date = it.res.date || it.date || ''; }); }
+  // Tarikh: yang tertulis dalam gambar (Date :05.10.2026) diguna terus. Selebihnya ikut susunan user tekan:
+  // gambar pertama = tarikh mula (default hari ini), gambar ke-2 = esok, dst. Tarikh yang user tukar sendiri kekal.
+  function fillDates(items) {
+    var start = (batch && batch.start) || todayISO();
+    items.forEach(function (it, k) {
+      if (it.manualDate) return;
+      it.date = it.res.date || addDays(start, k);
+    });
+  }
   // Petak tarikh: '?' kalau tiada tarikh
   function dateTile(iso) {
     if (!iso) return '<div class="r-date nodate"><b>?</b><span>' + t('noDateShort') + '</span></div>';
@@ -687,6 +692,8 @@
     openSheet('<div id="bWrap"><h3>' + t('batchTitle', items.length) + '</h3>' +
       '<div class="r-msg ' + (okN === items.length ? 'ok' : 'warn') + '">' + (okN === items.length ? ic('check') + t('batchAllOk', esc(batch.name)) : t('batchSome', okN, items.length)) + '</div>' +
       (items.some(function (it) { return !it.date; }) ? '<div class="r-msg warn">' + t('undatedNote', items.filter(function (it) { return !it.date; }).length) + '</div>' : '') +
+      '<label class="fld"><span>' + t('firstDate') + '</span><input type="date" id="bStart" value="' + (batch.start || '') + '"></label>' +
+      '<div class="fine" style="margin:-4px 0 10px">' + t('firstDateHint') + '</div>' +
       '<div class="rows" style="margin-bottom:12px">' + rows + '</div>' +
       '<div class="preview">' + t('batchTotal') + ' <span style="margin-left:auto">' + fmtH(tot) + ' ' + t('h') + '</span></div>' +
       '<div class="btn-row"><button class="btn ghost" id="bNo">' + t('cancel') + '</button>' +
@@ -696,6 +703,11 @@
     $('bWrap').addEventListener('click', function (ev) {
       var r = ev.target.closest('[data-k]'); if (!r) return;
       editItem(+r.getAttribute('data-k'), run);
+    });
+    // Tukar tarikh gambar pertama: gambar lain ikut (kecuali tarikh dari gambar / yang user tukar sendiri)
+    $('bStart').addEventListener('change', function () {
+      if (!this.value) return;
+      batch.start = this.value; fillDates(items); rosterSummary();
     });
     $('bNo').onclick = function () { batch = null; closeSheet(); };
     $('bSave').onclick = function () {
@@ -786,7 +798,7 @@
     });
     paint();
     $('rOk').onclick = function () {
-      if ($('rDate').value) it.date = $('rDate').value;
+      if ($('rDate').value && $('rDate').value !== it.date) { it.date = $('rDate').value; it.manualDate = true; }
       it.ok = true;
       back();
     };
